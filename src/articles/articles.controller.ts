@@ -14,11 +14,22 @@ import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { ArticlesService } from './articles.service';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
+import { PREDEFINED_CATEGORIES, Category } from '../constants/categories';
 
 @ApiTags('articles')
 @Controller('articles')
 export class ArticlesController {
   constructor(private readonly articlesService: ArticlesService) {}
+
+  @Get('categories')
+  @ApiOperation({ summary: 'Get all available categories' })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns the list of all predefined categories',
+  })
+  getCategories() {
+    return PREDEFINED_CATEGORIES;
+  }
 
   @Post()
   @ApiOperation({ summary: 'Create a new article' })
@@ -36,6 +47,12 @@ export class ArticlesController {
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'published', required: false, type: Boolean })
   @ApiQuery({ name: 'tag', required: false, type: String })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    enum: PREDEFINED_CATEGORIES,
+    description: 'Article category',
+  })
   @ApiQuery({ name: 'author', required: false, type: String })
   @ApiQuery({ name: 'searchTerm', required: false, type: String })
   findAll(
@@ -43,6 +60,7 @@ export class ArticlesController {
     @Query('limit') limit?: number,
     @Query('published') published?: boolean,
     @Query('tag') tag?: string,
+    @Query('category') category?: Category,
     @Query('author') author?: string,
     @Query('searchTerm') searchTerm?: string,
   ) {
@@ -51,6 +69,7 @@ export class ArticlesController {
       limit,
       published,
       tag,
+      category: category as Category,
       author,
       searchTerm,
     });

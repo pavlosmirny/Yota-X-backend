@@ -9,6 +9,7 @@ import { Model, FilterQuery } from 'mongoose';
 import { Article, ArticleDocument } from './schemas/article.schema';
 import { CreateArticleDto } from './dto/create-article.dto';
 import { UpdateArticleDto } from './dto/update-article.dto';
+import { PREDEFINED_CATEGORIES, Category } from '../constants/categories';
 
 @Injectable()
 export class ArticlesService {
@@ -29,8 +30,8 @@ export class ArticlesService {
 
       const createdArticle = new this.articleModel({
         ...createArticleDto,
-        relatedTags: new Map(),
-        tagViews: new Map(),
+        relatedTags: {},
+        tagViews: {},
       });
 
       return await createdArticle.save();
@@ -53,6 +54,7 @@ export class ArticlesService {
     limit?: number;
     published?: boolean;
     tag?: string;
+    category?: Category;
     author?: string;
     searchTerm?: string;
   }): Promise<{
@@ -61,7 +63,15 @@ export class ArticlesService {
     page: number;
     totalPages: number;
   }> {
-    const { page = 1, limit = 10, published, tag, author, searchTerm } = query;
+    const {
+      page = 1,
+      limit = 10,
+      published,
+      tag,
+      category,
+      author,
+      searchTerm,
+    } = query;
     const filter: FilterQuery<ArticleDocument> = {};
 
     if (published !== undefined) {
@@ -69,6 +79,9 @@ export class ArticlesService {
     }
     if (tag) {
       filter.tags = tag;
+    }
+    if (category && PREDEFINED_CATEGORIES.includes(category as Category)) {
+      filter.category = category;
     }
     if (author) {
       filter.author = author;
@@ -109,14 +122,11 @@ export class ArticlesService {
       throw new NotFoundException('Article not found');
     }
 
-    // Обновляем счетчики просмотров для тегов
-    const tagViews = new Map(article.tagViews);
+    const tagViews = article.tagViews || {};
     article.tags.forEach((tag) => {
-      const currentViews = tagViews.get(tag) || 0;
-      tagViews.set(tag, currentViews + 1);
+      tagViews[tag] = (tagViews[tag] || 0) + 1;
     });
 
-    // Обновляем статью с новыми данными просмотров
     article.tagViews = tagViews;
     await article.save();
 
@@ -128,6 +138,11 @@ export class ArticlesService {
     currentSlug: string,
     updateArticleDto: UpdateArticleDto,
   ): Promise<ArticleDocument> {
+    const category = updateArticleDto.category as Category;
+    if (category && !PREDEFINED_CATEGORIES.includes(category)) {
+      throw new BadRequestException('Invalid category');
+    }
+
     if (updateArticleDto.slug) {
       const existingArticle = await this.articleModel
         .findOne({
@@ -152,6 +167,39 @@ export class ArticlesService {
     return updatedArticle;
   }
 
+  // Получение статей по категории
+  async findByCategory(
+    category: Category,
+    limit = 10,
+  ): Promise<ArticleDocument[]> {
+    if (!PREDEFINED_CATEGORIES.includes(category)) {
+      throw new BadRequestException('Invalid category');
+    }
+
+    return this.articleModel
+      .find({ category, published: true })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .exec();
+  }
+
+  // Получение статистики по категориям
+  async getCategoryStats(): Promise<
+    Array<{ category: Category; count: number }>
+  > {
+    const categories = await this.articleModel.aggregate([
+      { $match: { published: true } },
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+      { $project: { category: '$_id', count: 1, _id: 0 } },
+      { $sort: { count: -1 } },
+    ]);
+
+    return categories.map((stat) => ({
+      category: stat.category as Category,
+      count: stat.count,
+    }));
+  }
+
   // Удаление статьи
   async remove(slug: string): Promise<void> {
     const result = await this.articleModel.findOneAndDelete({ slug }).exec();
@@ -160,23 +208,22 @@ export class ArticlesService {
     }
   }
 
-  // Получение связанных статей по тегам
+  // Получение связанных статей
   async getRelatedArticles(
     slug: string,
     limit = 3,
   ): Promise<ArticleDocument[]> {
     const article = await this.findOne(slug);
 
-    // Получаем все статьи с похожими тегами
     const relatedArticles = await this.articleModel
       .find({
         slug: { $ne: slug },
         published: true,
+        category: article.category,
         tags: { $in: article.tags },
       })
       .exec();
 
-    // Рассчитываем релевантность для каждой статьи
     const articlesWithRelevance = relatedArticles.map((relatedArticle) => {
       const commonTags = relatedArticle.tags.filter((tag) =>
         article.tags.includes(tag),
@@ -185,45 +232,45 @@ export class ArticlesService {
       return { article: relatedArticle, relevance: relevanceScore };
     });
 
-    // Сортируем по релевантности и ограничиваем количество
     return articlesWithRelevance
       .sort((a, b) => b.relevance - a.relevance)
       .slice(0, limit)
       .map((item) => item.article);
   }
 
-  // Получение всех тегов с количеством использований
+  // Получение тегов с количеством
   async getTagsWithCount(): Promise<Array<{ tag: string; count: number }>> {
     const articles = await this.articleModel.find({ published: true }).exec();
-    const tagCount = new Map<string, number>();
+    const tagCount: { [key: string]: number } = {};
 
     articles.forEach((article) => {
       article.tags.forEach((tag) => {
-        tagCount.set(tag, (tagCount.get(tag) || 0) + 1);
+        tagCount[tag] = (tagCount[tag] || 0) + 1;
       });
     });
 
-    return Array.from(tagCount.entries()).map(([tag, count]) => ({
+    return Object.entries(tagCount).map(([tag, count]) => ({
       tag,
       count,
     }));
   }
 
-  // Получение популярных тегов на основе просмотров
+  // Получение популярных тегов
   async getPopularTags(
     limit = 5,
   ): Promise<Array<{ tag: string; views: number }>> {
     const articles = await this.articleModel.find({ published: true }).exec();
-
-    const tagViews = new Map<string, number>();
+    const tagViews: { [key: string]: number } = {};
 
     articles.forEach((article) => {
-      article.tagViews.forEach((views, tag) => {
-        tagViews.set(tag, (tagViews.get(tag) || 0) + views);
-      });
+      if (article.tagViews) {
+        Object.entries(article.tagViews).forEach(([tag, views]) => {
+          tagViews[tag] = (tagViews[tag] || 0) + views;
+        });
+      }
     });
 
-    return Array.from(tagViews.entries())
+    return Object.entries(tagViews)
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit)
       .map(([tag, views]) => ({ tag, views }));
@@ -234,22 +281,23 @@ export class ArticlesService {
     const relatedArticles = await this.articleModel
       .find({
         slug: { $ne: article.slug },
+        category: article.category,
         tags: { $in: article.tags },
       })
       .exec();
 
-    const tagRelations = new Map<string, number>();
+    const tagRelations: { [key: string]: number } = {};
 
     relatedArticles.forEach((relatedArticle) => {
       relatedArticle.tags.forEach((tag) => {
         if (!article.tags.includes(tag)) {
-          tagRelations.set(tag, (tagRelations.get(tag) || 0) + 1);
+          tagRelations[tag] = (tagRelations[tag] || 0) + 1;
         }
       });
     });
 
-    article.relatedTags = new Map(
-      Array.from(tagRelations.entries())
+    article.relatedTags = Object.fromEntries(
+      Object.entries(tagRelations)
         .sort((a, b) => b[1] - a[1])
         .map(([tag, count]) => [tag, count / relatedArticles.length]),
     );

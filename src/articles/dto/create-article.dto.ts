@@ -7,8 +7,10 @@ import {
   IsString,
   IsUrl,
   ValidateNested,
+  IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PREDEFINED_CATEGORIES } from '../../constants/categories';
 
 export class SeoMetadataDto {
   @ApiProperty({
@@ -37,7 +39,6 @@ export class SeoMetadataDto {
   metaKeywords: string[];
 }
 
-// DTO для создания статьи
 export class CreateArticleDto {
   @ApiProperty({
     example: 'Understanding DevOps',
@@ -79,6 +80,17 @@ export class CreateArticleDto {
   @IsString({ each: true })
   @IsOptional()
   tags: string[];
+
+  @ApiProperty({
+    enum: PREDEFINED_CATEGORIES,
+    example: 'DevOps',
+    description: 'Category of the article',
+  })
+  @IsEnum(PREDEFINED_CATEGORIES, {
+    message: 'Category must be one of the predefined categories',
+  })
+  @IsNotEmpty()
+  category: (typeof PREDEFINED_CATEGORIES)[number];
 
   @ApiProperty({
     example: 'John Doe',

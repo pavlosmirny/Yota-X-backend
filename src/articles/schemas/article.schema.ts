@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
+import { Category, PREDEFINED_CATEGORIES } from '../../constants/categories';
 
 @Schema()
 class SeoMetadata {
@@ -15,7 +16,7 @@ class SeoMetadata {
 
 export type ArticleDocument = Article & Document;
 
-@Schema()
+@Schema({ timestamps: true })
 export class Article {
   @Prop({ required: true })
   title: string;
@@ -29,8 +30,15 @@ export class Article {
   @Prop({ required: true })
   description: string;
 
-  @Prop({ type: [String], default: [], index: true }) // Добавляем индекс для тегов
+  @Prop({ type: [String], default: [] })
   tags: string[];
+
+  @Prop({
+    type: String,
+    required: true,
+    enum: PREDEFINED_CATEGORIES,
+  })
+  category: Category;
 
   @Prop({ required: true })
   author: string;
@@ -44,28 +52,19 @@ export class Article {
   @Prop({ type: SeoMetadata, required: true })
   seo: SeoMetadata;
 
-  @Prop({ type: Date })
-  createdAt: Date;
+  @Prop({ type: Object, default: {} })
+  relatedTags: { [key: string]: number };
 
-  @Prop({ type: Date })
-  updatedAt: Date;
-
-  // Добавляем поле для связанных тегов и их весов
-  @Prop({ type: Map, of: Number, default: new Map() })
-  relatedTags: Map<string, number>;
-
-  // Добавляем поле для хранения счетчика просмотров по тегам
-  @Prop({ type: Map, of: Number, default: new Map() })
-  tagViews: Map<string, number>;
+  @Prop({ type: Object, default: {} })
+  tagViews: { [key: string]: number };
 }
 
 export const ArticleSchema = SchemaFactory.createForClass(Article);
 
-// Добавляем составной индекс для поиска по тегам и дате публикации
+// Составные индексы
 ArticleSchema.index({ tags: 1, createdAt: -1 });
-
-// Добавляем индекс для поиска похожих статей
 ArticleSchema.index({ tags: 1, published: 1 });
+ArticleSchema.index({ category: 1, published: 1 }); // Обновленный индекс для категорий
 
 export interface ArticleModel extends Document {
   title: string;
@@ -73,6 +72,7 @@ export interface ArticleModel extends Document {
   content: string;
   description: string;
   tags: string[];
+  category: Category;
   author: string;
   published: boolean;
   imageUrl?: string;
@@ -83,6 +83,6 @@ export interface ArticleModel extends Document {
   };
   createdAt: Date;
   updatedAt: Date;
-  relatedTags: Map<string, number>;
-  tagViews: Map<string, number>;
+  relatedTags: { [key: string]: number };
+  tagViews: { [key: string]: number };
 }
